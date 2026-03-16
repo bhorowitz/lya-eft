@@ -125,6 +125,12 @@ class IvanovFullParams:
     b_eta_Pi2_par: float = 0.0
     b_KPi2_par: float = 0.0
     b_Pi3_par: float = 0.0
+    # Minimal EFT-like counterterms in an angular basis multiplying k^2 P_lin(k).
+    # These are phenomenological knobs to absorb high-q sensitivity of the one-loop
+    # into simple k^2 P_lin(k) terms with mu-dependence.
+    c0_ct: float = 0.0
+    c2_ct: float = 0.0
+    c4_ct: float = 0.0
 
 
 class IvanovFullModel:
@@ -283,6 +289,134 @@ class IvanovFullModel:
         p13 = 6.0 * k1 * pk * i3
         return p22, p13
 
+    def loop_contributions_by_q(
+        self,
+        k: np.ndarray,
+        mu: np.ndarray,
+        params: IvanovFullParams,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return per-quadrature-point contributions to p22 and p13 for each k.
+
+        Returns three arrays with shape (k.size, n_qpoints_total):
+          - p22_contribs: contribution from each ravelled quadrature node to the p22 sum
+          - p13_contribs: contribution from each ravelled quadrature node to the p13 sum
+          - q_values: the q value associated with each quadrature node
+
+        This helper duplicates parts of _loop_terms to expose the integrand so
+        that cumulative sums (as a function of qmax) can be constructed.
+        """
+        k_arr = np.asarray(k, dtype=float).ravel()
+        mu_arr = np.asarray(mu, dtype=float).ravel()
+        if k_arr.size != mu_arr.size:
+            raise ValueError("k and mu must have the same shape for per-q contributions")
+
+        # replicate much of _loop_terms but keep the per-node arrays
+        kx = k_arr * np.sqrt(np.maximum(1.0 - mu_arr**2, 0.0))
+        kz = k_arr * mu_arr
+
+        dot_kq = kx[:, None] * self.qx[None, :] + kz[:, None] * self.qz[None, :]
+        p2 = np.maximum(k_arr[:, None] ** 2 + self.q2[None, :] - 2.0 * dot_kq, self._eps)
+        p = np.sqrt(p2)
+        pz = kz[:, None] - self.qz[None, :]
+        pp = np.asarray(self._interp(p.ravel()), dtype=float).reshape(p.shape)
+
+        mu1 = _safe_div(self.qz[None, :], self.q[None, :], eps=self._eps)
+        mu2 = _safe_div(pz, p, eps=self._eps)
+        cos12 = _safe_div(dot_kq - self.q2[None, :], p * self.q[None, :], eps=self._eps)
+        khat_dot_qhat = self._khat_dot_qhat(k_arr, dot_kq)
+
+        qvec = _vec(np.broadcast_to(self.qx[None, :], p.shape), np.broadcast_to(self.qy[None, :], p.shape), np.broadcast_to(self.qz[None, :], p.shape))
+        pvec = _vec(kx[:, None] - self.qx[None, :], -self.qy[None, :], kz[:, None] - self.qz[None, :])
+        kvec = _vec(kx[:, None], np.zeros_like(p), kz[:, None])
+        minus_qvec = _vec(-qvec[0], -qvec[1], -qvec[2])
+
+        f2 = _f2_sym(qvec, pvec)
+        g2 = _g2_sym(qvec, pvec)
+        f3 = _f3_sym(kvec, qvec, minus_qvec)
+        g3 = _g3_sym(qvec, minus_qvec, kvec)
+
+        k2_over_q = _safe_div(p, self.q[None, :], eps=self._eps) + _safe_div(self.q[None, :], p, eps=self._eps)
+        eta_mix = mu1 * mu2 * (
+            mu2 * _safe_div(p, self.q[None, :], eps=self._eps)
+            + mu1 * _safe_div(self.q[None, :], p, eps=self._eps)
+        )
+        K2 = (
+            0.5 * params.b_delta2
+            + params.b_G2 * (cos12**2 - 1.0)
+            + params.b1 * f2
+            - params.b_eta * self.f_growth * mu_arr[:, None] ** 2 * g2
+            - 0.5 * self.f_growth * params.b_delta_eta * (mu1**2 + mu2**2)
+            + params.b_eta2 * self.f_growth**2 * mu1**2 * mu2**2
+            + 0.5 * params.b1 * self.f_growth * mu1 * mu2 * k2_over_q
+            - 0.5 * params.b_eta * self.f_growth**2 * eta_mix
+            + params.b_KK_par * (mu1 * mu2 * cos12 - (mu1**2 + mu2**2) / 3.0 + 1.0 / 9.0)
+            + params.b_Pi2_par * (mu1 * mu2 * cos12 + (5.0 / 7.0) * mu_arr[:, None] ** 2 * (1.0 - cos12**2))
+        )
+
+        # per-node contributions (before summing over nodes)
+        # p22 contribution per ravelled quadrature node
+        integrand_p22 = 2.0 * (K2**2) * self.pq[None, :] * pp * self.weight[None, :]
+
+        # prepare auxiliary quantities for p13
+        selector = 1.0 - khat_dot_qhat**2
+
+        qpar2_over_q2 = _safe_div(self.qz[None, :] ** 2, self.q2[None, :], eps=self._eps)
+        ppar2_over_p2 = _safe_div(pz**2, p2, eps=self._eps)
+        pq_mixed = _safe_div((dot_kq - self.q2[None, :]) * pz * self.qz[None, :], p2 * self.q2[None, :], eps=self._eps)
+        pq_shear = _safe_div((dot_kq - self.q2[None, :]) * pz**2, p2 * self.q2[None, :], eps=self._eps)
+        pq_cross = _safe_div((dot_kq - self.q2[None, :]) * self.qz[None, :] * pz, self.q2[None, :] * p2, eps=self._eps)
+        qpar_ppar = self.qz[None, :] * pz
+        qpar_ppar_over_q2 = _safe_div(qpar_ppar, self.q2[None, :], eps=self._eps)
+        qpar_ppar_over_p2 = _safe_div(qpar_ppar, p2, eps=self._eps)
+        qpar_ppar_over_q2p2 = _safe_div(qpar_ppar, self.q2[None, :] * p2, eps=self._eps)
+
+        extra = (
+            (4.0 / 21.0) * (5.0 * params.b_G2 + 2.0 * params.b_gamma3) * (cos12**2 - 1.0)
+            - (2.0 / 21.0) * self.f_growth * params.b_delta_eta * (3.0 * ppar2_over_p2 + 5.0 * qpar2_over_q2)
+            + (4.0 / 7.0) * self.f_growth**2 * params.b_eta2 * qpar2_over_q2 * ppar2_over_p2
+            + (20.0 / 21.0)
+            * params.b_KK_par
+            * (pq_mixed - ppar2_over_p2 / 3.0 - qpar2_over_q2 / 3.0 + 1.0 / 9.0)
+            + (10.0 / 21.0) * params.b_Pi2_par * pq_shear
+            + (10.0 / 21.0)
+            * (
+                params.b_delta_Pi2_par
+                - params.b_KPi2_par / 3.0
+                - self.f_growth * params.b_eta_Pi2_par * qpar2_over_q2
+            )
+            * ppar2_over_p2
+            + (10.0 / 21.0) * params.b_KPi2_par * pq_cross
+            + (10.0 / 21.0)
+            * self.f_growth
+            * params.b_Pi2_par
+            * _safe_div(self.qz[None, :] * pz**3, self.q2[None, :] * p2, eps=self._eps)
+            + (params.b_Pi3_par + 2.0 * params.b_Pi2_par)
+            * (
+                (13.0 / 21.0) * pq_cross
+                - (5.0 / 9.0) * mu_arr[:, None] ** 2 * (cos12**2 - 1.0 / 3.0)
+            )
+            + (2.0 / 21.0)
+            * self.f_growth
+            * params.b1
+            * (5.0 * qpar_ppar_over_q2 + 3.0 * qpar_ppar_over_p2)
+            - (2.0 / 7.0)
+            * self.f_growth**2
+            * params.b_eta
+            * qpar_ppar_over_q2p2
+            * (pz**2 + self.qz[None, :] ** 2)
+        )
+
+        i3_node_extra = selector * self.pq[None, :] * extra * self.weight[None, :]
+        i3_node_f3 = params.b1 * f3 * self.pq[None, :] * self.weight[None, :]
+        i3_node_g3 = - self.f_growth * params.b_eta * mu_arr[:, None] ** 2 * g3 * self.pq[None, :] * self.weight[None, :]
+        i3_nodes_total = i3_node_f3 + i3_node_g3 + i3_node_extra
+
+        pk_ext = np.asarray(self._interp(k_arr), dtype=float)[:, None]
+        k1_arr = params.b1 - params.b_eta * self.f_growth * mu_arr**2
+        p13_nodes = 6.0 * k1_arr[:, None] * pk_ext * i3_nodes_total
+
+        return integrand_p22, p13_nodes, self.q[None, :]
+
     def evaluate_components(
         self,
         k: np.ndarray,
@@ -301,10 +435,13 @@ class IvanovFullModel:
         k1 = params.b1 - params.b_eta * self.f_growth * mu_flat**2
         tree = k1**2 * pk
         p22, p13 = self._loop_terms(k_flat, mu_flat, params)
-        total = tree + p22 + p13
+        # Minimal EFT counterterm basis: (c0 + c2 mu^2 + c4 mu^4) * k^2 * P_lin(k).
+        ct = (params.c0_ct + params.c2_ct * mu_flat**2 + params.c4_ct * mu_flat**4) * (k_flat**2) * pk
+        total = tree + p22 + p13 + ct
         return {
             "tree": tree.reshape(shape),
             "loop_22": p22.reshape(shape),
             "loop_13": p13.reshape(shape),
+            "counterterm": ct.reshape(shape),
             "total": total.reshape(shape),
         }

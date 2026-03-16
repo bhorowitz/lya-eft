@@ -1,0 +1,95 @@
+run:
+  tag: baseline_ivanov_toy
+  output_root: results/runs
+
+cosmology:
+  h: 0.6774
+  omega_b: 0.0486
+  omega_cdm: 0.2589
+  ns: 0.9667
+  As: 2.1e-9
+  z: 2.8
+
+k_grid:
+  kmin: 1.0e-3
+  kmax: 6.0
+  nk: 800
+
+mu_grid:
+  nmu: 121
+
+backend:
+  kmin: 1.0e-2
+  kmax: 0.6
+  nk: 220
+  threads: 1
+  beyond_gauss: false
+
+ivanov_toy:
+  b1: -0.14
+  b_eta: -0.2
+  c0: 0.45
+  c2: 0.8
+  c4: 0.3
+  loop_amp: 0.35
+  loop_mu2: 0.6
+  loop_mu4: 0.2
+  loop_k_nl: 1.7
+  stochastic: 0.0
+
+hybrid_toy:
+  b_delta: -0.14
+  b_eta: -0.2
+  b_t: 0.03
+  c0: 0.45
+  c2: 0.8
+  c4: 0.3
+  loop_amp: 0.35
+  loop_mu2: 0.6
+  loop_mu4: 0.2
+  loop_k_nl: 1.7
+  sigma_th: 0.08
+  k_t: 0.5
+  stochastic: 0.0
+
+fit:
+  kmin_fit: 0.03
+  kmax_fit: 3.0
+  sigma_frac: 0.05
+  sigma_floor: 0.02
+
+mcmc:
+  nwalkers: 48
+  nsteps: 2500
+  burnin: 700
+  thin: 10
+  seed: 42
+  init_jitter_frac: 0.02
+  posterior_band_draws: 220
+
+joint_mcmc:
+  parametrization: sigma8
+  nwalkers: 40
+  nsteps: 3000
+  burnin: 500
+  thin: 8
+  seed: 2026
+  checkpoint_every: 1000
+  posterior_band_draws: 220
+  omega_min: 0.20
+  omega_max: 0.33
+  n_omega_grid: 65
+  as_min: 1.0e-9
+  as_max: 3.5e-9
+  sigma8_min: 0.60
+  sigma8_max: 1.05
+  hybrid_tight_priors: true
+
+projection_1d:
+  kpar_min: 0.03
+  kpar_max: 4.0
+  nkpar: 150
+  kmax_proj: 6.0
+  poly_c0: 0.0
+  poly_c2: 0.0
+  poly_c4: 0.0

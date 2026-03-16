@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lya-hybrid"
+version = "0.1.0"
+description = "Hybrid EFT research scaffold for Lyman-alpha forest"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Benjamin Horowitz" }]
+dependencies = [
+  "numpy<2",
+  "scipy",
+  "matplotlib",
+  "pyyaml",
+  "pydantic>=2",
+  "pandas",
+  "h5py",
+  "fitsio",
+  "emcee",
+  "camb",
+  "velocileptors",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
